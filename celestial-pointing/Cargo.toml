@@ -22,7 +22,7 @@ bitflags.workspace = true
 rustyline.workspace = true
 dirs.workspace = true
 textplots.workspace = true
-rizzma = { version = "1.13.7", default-features = false }
+rizzma = { version = "1.14.1", default-features = false }
 
 [[bin]]
 name = "pointing"

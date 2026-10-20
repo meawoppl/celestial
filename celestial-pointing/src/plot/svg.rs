@@ -1,4 +1,6 @@
-use rizzma::artist::{Collection, Line2D, Patch, Rgba};
+use rizzma::artist::Rgba;
+use rizzma::core::AxisBelow;
+use rizzma::figure::{Bins, HistOptions, QuiverAngles, QuiverOptions, QuiverUnits};
 use rizzma::{Axes, Figure};
 use std::path::Path;
 
@@ -6,8 +8,6 @@ type PlotResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
 const TITLE_SIZE_PX: f64 = 19.0;
 const MARKER_DIAMETER_PT: f64 = 6.0 * 72.0 / 100.0;
-const HEAD_LENGTH_FRACTION: f64 = 0.35;
-const HEAD_HALF_WIDTH_FRACTION: f64 = 0.2;
 
 pub fn scatter_svg(
     points: &[(f64, f64)],
@@ -32,11 +32,14 @@ pub fn histogram_svg(values: &[f64], path: &Path, title: &str, x_label: &str) ->
     }
     let mut fig = new_figure();
     let ax = fig.add_subplot(1, 1, 1);
-    let (counts, edges) = ax.hist(values, 20);
-    let (Some(&x_min), Some(&x_max)) = (edges.first(), edges.last()) else {
+    let hist = ax.hist_with(
+        values,
+        &HistOptions::new().bins(Bins::Count(20)).color(Rgba::BLUE),
+    );
+    let (Some(&x_min), Some(&x_max)) = (hist.edges.first(), hist.edges.last()) else {
         return Ok(());
     };
-    let max_count = counts.iter().copied().fold(1.0, f64::max);
+    let max_count = hist.counts.iter().copied().fold(1.0, f64::max);
     setup_axes(
         ax,
         title,
@@ -45,7 +48,8 @@ pub fn histogram_svg(values: &[f64], path: &Path, title: &str, x_label: &str) ->
         &(x_min, x_max),
         &(0.0, max_count + 1.0),
     );
-    ax.grid(false);
+    // Keep the grid behind the bars.
+    ax.set_axisbelow(AxisBelow::Below);
     fig.save_svg(path)?;
     Ok(())
 }
@@ -120,32 +124,27 @@ fn draw_crosshairs(ax: &mut Axes) {
 fn draw_points(ax: &mut Axes, points: &[(f64, f64)]) {
     let xs: Vec<f64> = points.iter().map(|p| p.0).collect();
     let ys: Vec<f64> = points.iter().map(|p| p.1).collect();
-    let coll = ax.scatter(&xs, &ys);
-    let styled = std::mem::replace(coll, Collection::scatter(Vec::new()));
-    *coll = styled
-        .with_facecolors(vec![Rgba::BLUE])
-        .with_sizes(vec![MARKER_DIAMETER_PT]);
+    ax.scatter(&xs, &ys)
+        .set_facecolors(vec![Rgba::BLUE])
+        .set_sizes(vec![MARKER_DIAMETER_PT]);
 }
 
+/// Each residual becomes an arrow from its position to `position + scale * vector`, in data units.
 fn draw_vectors(ax: &mut Axes, positions: &[(f64, f64)], vectors: &[(f64, f64)], scale: f64) {
-    for (&(px, py), &(vx, vy)) in positions.iter().zip(vectors.iter()) {
-        let (dx, dy) = (vx * scale, vy * scale);
-        let len = libm::hypot(dx, dy);
-        if len == 0.0 || !len.is_finite() {
-            continue;
-        }
-        let dir = (dx / len, dy / len);
-        let tip = [px + dx, py + dy];
-        let hl = HEAD_LENGTH_FRACTION * len;
-        let hw = HEAD_HALF_WIDTH_FRACTION * len;
-        let neck = [tip[0] - hl * dir.0, tip[1] - hl * dir.1];
-        ax.add_line(Line2D::new(vec![px, neck[0]], vec![py, neck[1]]).with_color(Rgba::RED));
-        let left = [neck[0] - hw * dir.1, neck[1] + hw * dir.0];
-        let right = [neck[0] + hw * dir.1, neck[1] - hw * dir.0];
-        ax.add_patch(
-            Patch::polygon(&[tip, left, right])
-                .facecolor(Some(Rgba::RED))
-                .edgecolor(Some(Rgba::RED)),
-        );
+    if scale <= 0.0 || !scale.is_finite() {
+        return;
     }
+    let (xs, ys): (Vec<f64>, Vec<f64>) = positions.iter().copied().unzip();
+    let (us, vs): (Vec<f64>, Vec<f64>) = vectors.iter().copied().unzip();
+    ax.quiver_with(
+        &xs,
+        &ys,
+        &us,
+        &vs,
+        &QuiverOptions::new()
+            .scale_units(QuiverUnits::Xy)
+            .angles(QuiverAngles::Xy)
+            .scale(1.0 / scale)
+            .color(Rgba::RED),
+    );
 }
